@@ -36,4 +36,4 @@ def fetch_page_text(url: str, max_chars: int = 4000) -> str:
 
     return text[:max_chars]
 
-print(fetch_page_text("https://weather.com/weather/tenday/l/Pittsburgh+PA?canonicalCityId=2b688109f8f42b180dd7d5d4b689f696"))
+# print(fetch_page_text("https://weather.com/weather/tenday/l/Pittsburgh+PA?canonicalCityId=2b688109f8f42b180dd7d5d4b689f696"))

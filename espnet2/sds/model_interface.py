@@ -3,13 +3,13 @@
 google_grounded_hf.py
 ---------------------
 
-Ground a Hugging Face LLM’s answer in fresh Google search results.
+Ground a Hugging Face LLM's answer in fresh Google search results.
 
 Steps
 1.  Read a question from the CLI (or prompt for it).
-2.  Call Google Custom Search JSON API for the top N web results.
+2.  Call Google Custom Search JSON API for the top N web results.
 3.  Build a prompt listing those results with numbered citations.
-4.  Send that prompt to a Hugging Face chat model (via Inference API or local).
+4.  Send that prompt to a Hugging Face chat model (via Inference API or local).
 5.  Print the answer and the numbered source list.
 
 Install
@@ -21,13 +21,16 @@ Environment variables
 GOOGLE_API_KEY   # Google API key
 GOOGLE_CX        # Programmable Search Engine ID (“cx”)
 HF_MODEL         # e.g.  mistralai/Mixtral-8x7B-Instruct-v0.1
-HF_TOKEN         # HF access token (needed for hosted Inference API)
+HF_TOKEN         # HF access token (needed for hosted Inference API)
 MAX_RESULTS      # optional, default 6
 """
 
 from __future__ import annotations
 import os, sys, textwrap, requests
-# from huggingface_hub import InferenceClient
+from dotenv import load_dotenv
+from browser import browser_search
+
+load_dotenv()
 
 # ---------------------------------------------------------------- helpers
 def getenv(name: str) -> str:
@@ -42,34 +45,10 @@ question = " ".join(sys.argv[1:]).strip() or input("Enter your question: ").stri
 if not question:
     sys.exit("No question provided.")
 
-# ---------------------------------------------------------------- 2. Google search
-api_key = getenv("GOOGLE_API_KEY")
-cx      = getenv("GOOGLE_CX")
-num     = 2
+# search question:
+print(browser_search(question))
 
-resp = requests.get(
-    "https://www.googleapis.com/customsearch/v1",
-    params={"key": api_key, "cx": cx, "q": question, "num": num, "hl": "en"},
-    timeout=10,
-)
-print(resp)
-resp.raise_for_status()
-items = resp.json().get("items", [])
-if not items:
-    sys.exit("Google search returned no items (quota exhausted or query too narrow).")
 
-results = [(it["title"], it["link"], it.get("snippet", "").replace("\n", " "))
-           for it in items]
-print(results)
-# ---------------------------------------------------------------- 3. craft prompt
-def format_results(res):
-    out = []
-    for i, (title, link, snippet) in enumerate(res, 1):
-        out.append(f"{i}. {title}\n   URL: {link}\n   Snippet: {snippet}")
-    return "\n".join(out)
-
-context_block = format_results(results)
-print(context_block)
 # prompt = f"""<s>[INST]
 # You are a concise assistant. Use ONLY the web results below to answer the user's
 # question, and cite sources by their list number in square brackets—[1], [2], etc.
