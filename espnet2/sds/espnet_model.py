@@ -1,11 +1,12 @@
 import time
 from contextlib import contextmanager
 from typing import Optional, Tuple
-
+import librosa
 import numpy as np
 import torch
 from packaging.version import parse as V
 from typeguard import typechecked
+from browser import browser_search
 
 from espnet2.sds.asr.espnet_asr import ESPnetASRModel
 from espnet2.sds.asr.owsm_asr import OWSMModel
@@ -37,7 +38,8 @@ except ImportError:
 
 
 class ESPnetSDSModelInterface(AbsESPnetModel):
-    """Web Interface for Spoken Dialog System models
+    """
+    Web Interface for Spoken Dialog System models
 
     This class provides a unified interface to integrate ASR, TTS, and LLM modules
     for cascaded spoken dialog systems as well as also
@@ -55,8 +57,7 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         type_option: str,
         access_token: str,
     ):
-        """Initializer method.
-
+        """
         Args:
             ASR_option (str):
                 The selected ASR model option to use for speech-to-text
@@ -87,22 +88,20 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         self.client = None
         self.vad_model = WebrtcVADModel()
         self.chat = Chat(2)
-        self.chat.init_chat(
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful and friendly AI "
-                    "assistant. "
-                    "You are polite, respectful, and aim to "
-                    "provide concise and complete responses of "
-                    "less than 15 words."
-                ),
-            }
-        )
+        self.chat.init_chat({
+            "role": "system",
+            "content": (
+                "You are a helpful and friendly AI assistant. You are polite, respectful, "
+                "and aim to provide concise, complete responses. "
+                "For each user question, first output *only* a concise search query to pass into browser_search(query). "
+                "Then, once provided the search results, craft a final answer using that information as help."
+            ),
+        })
         self.user_role = "user"
 
     def handle_TTS_selection(self, option: str):
-        """Handles the selection and initialization of a Text-to-Speech (TTS) model.
+        """
+        Handles the selection and initialization of a Text-to-Speech (TTS) model.
 
         This method dynamically loads the selected TTS model based
         on the provided option.
@@ -130,7 +129,8 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         yield gr.Textbox(visible=True), gr.Textbox(visible=True), gr.Audio(visible=True)
 
     def handle_LLM_selection(self, option: str):
-        """Handles the selection and initialization of a LLM.
+        """
+        Handles the selection and initialization of a LLM.
 
         This method dynamically loads the selected LLM based
         on the provided option.
@@ -154,7 +154,8 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         yield gr.Textbox(visible=True), gr.Textbox(visible=True), gr.Audio(visible=True)
 
     def handle_ASR_selection(self, option: str):
-        """Handles the selection and initialization of ASR model.
+        """
+        Handles the selection and initialization of ASR model.
 
         This method dynamically loads the selected ASR based
         on the provided option.
@@ -192,7 +193,8 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         yield gr.Textbox(visible=True), gr.Textbox(visible=True), gr.Audio(visible=True)
 
     def handle_E2E_selection(self):
-        """Handles the selection and initialization of E2E model Mini-Omni.
+        """
+        Handles the selection and initialization of E2E model Mini-Omni.
 
         This method dynamically loads the E2E spoken dialog model.
         If the model is already active, it avoids reloading to save resources.
@@ -204,8 +206,8 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
     def handle_type_selection(
         self, option: str, TTS_radio: str, ASR_radio: str, LLM_radio: str
     ):
-        """Handles the selection of the spoken dialogue model type (Cascaded or E2E)
-
+        """
+        Handles the selection of the spoken dialogue model type (Cascaded or E2E)
         and dynamically updates the interface based on the selected option.
 
         This method manages the initialization of ASR, TTS, and LLM models
@@ -287,82 +289,65 @@ class ESPnetSDSModelInterface(AbsESPnetModel):
         latency_LM: float,
         latency_TTS: float,
     ):
-        """Processes audio input to generate ASR, LLM, and TTS outputs
-
+        """
+        Processes audio input to generate ASR, LLM, and TTS outputs
         while calculating latencies.
 
         This method handles both Cascaded and End-to-End setups.
-
-        Args:
-            y: Input audio array.
-            sr : Sampling rate of the input audio.
-            stream : The current audio stream buffer.
-            asr_output_str : Previously generated ASR output string.
-            text_str : Previously generated LLM text response.
-            audio_output : Previously generated TTS audio output.
-            audio_output1 (): Placeholder for audio stream.
-            latency_ASR (float): Latency for ASR processing.
-            latency_LM (float): Latency for LLM processing.
-            latency_TTS (float): Latency for TTS processing.
-
-        Returns:
-            Tuple[str, str, Optional[Tuple[int, np.ndarray]],
-            Optional[Tuple[int, np.ndarray]], float, float, float, bool]:
-                - Updated ASR output string.
-                - Updated LLM-generated text.
-                - Updated TTS audio output.
-                - Updated user audio stream output.
-                - ASR latency.
-                - LLM latency.
-                - TTS latency.
-                - Update audio stream
-                - Change flag indicating if output was updated.
         """
         orig_sr = sr
-        sr = 16000
-        if self.client is not None:
-            array = self.vad_model(y, orig_sr, binary=True)
-        else:
-            array = self.vad_model(y, orig_sr)
+        target_sr = 16000  # internal processing sample rate for VAD and ASR
+
+        y_float = y.astype(np.float32) / 32768.0
+
+        # 🛠️ Now resample from the original rate → 16 kHz
+        array = librosa.resample(y_float, sr, 16000)
+
+        print(array)
+
         change = False
         if array is not None:
-            print("VAD: end of speech detected")
+            change = True
             start_time = time.time()
-            if self.client is not None:
-                (text_str, audio_output) = self.client(array, orig_sr)
-                asr_output_str = ""
-                latency_TTS = time.time() - start_time
-            else:
-                prompt = self.s2t(array)
-                if len(prompt.strip().split()) < 2:
-                    return (
-                        asr_output_str,
-                        text_str,
-                        audio_output,
-                        audio_output1,
-                        latency_ASR,
-                        latency_LM,
-                        latency_TTS,
-                        stream,
-                        change,
-                    )
 
-                asr_output_str = prompt
-                start_LM_time = time.time()
-                latency_ASR = start_LM_time - start_time
-                self.chat.append({"role": self.user_role, "content": prompt})
-                chat_messages = self.chat.to_list()
-                generated_text = self.LM_pipe(chat_messages)
-                start_TTS_time = time.time()
-                latency_LM = start_TTS_time - start_LM_time
+            # 3) ASR
+            asr_text = self.s2t(array)
+            asr_output_str = asr_text
+            latency_ASR = time.time() - start_time
 
-                self.chat.append({"role": "assistant", "content": generated_text})
-                text_str = generated_text
-                audio_output = self.text2speech(text_str)
-                latency_TTS = time.time() - start_TTS_time
+            # 4) Build a search‐query prompt
+            query_prompt = [
+                {"role": "system",
+                 "content": "Given the user transcription, output *only* a concise search query "
+                            "to pass into browser_search(query)."},
+                {"role": "user", "content": asr_text},
+            ]
+            # 5) Ask the LLM for that query
+            raw_query = self.LM_pipe(query_prompt).strip()
+            latency_LM = time.time() - start_time - latency_ASR
+            raw_query = raw_query.replace('"', '')
+            print("Raw Query:\n", raw_query)
+            # 6) Run your browser_search (assumed to return a text summary)
+            search_results = browser_search(raw_query)
+
+            # 7) Ask LLM to craft the final answer using those results
+            final_prompt = self.chat.to_list() + [
+                {"role": "assistant", "content": f"Search results:\n{search_results}"},
+                {"role": "user", "content": f"Please answer the original request: {asr_text} using above results for help only output."},
+            ]
+            final_text = self.LM_pipe(final_prompt)
+            text_str = final_text
+            latency_LM += time.time() - (start_time + latency_ASR + latency_LM)
+
+            # 8) TTS the final answer
+            start_tts = time.time()
+            audio_output = self.text2speech(text_str)
+            latency_TTS = time.time() - start_tts
+
+            # 9) preserve the original stream
             audio_output1 = (orig_sr, stream)
             stream = y
-            change = True
+
         return (
             asr_output_str,
             text_str,

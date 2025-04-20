@@ -45,5 +45,6 @@ def grab_text_from_link(res, max_chars = 4000):
 
 def browser_search(query, max_chars = 4000, num_links = 2):
     search_res = search(query, num_links)
-    print(search_res)
+    print("browser result")
+    print(grab_text_from_link(search_res, max_chars))
     return grab_text_from_link(search_res, max_chars)

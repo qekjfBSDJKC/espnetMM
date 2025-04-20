@@ -26,9 +26,10 @@ MAX_RESULTS      # optional, default 6
 """
 
 from __future__ import annotations
-import os, sys, textwrap, requests
+import os, sys
 from dotenv import load_dotenv
 from browser import browser_search
+from asr.whisper_asr import WhisperASRModel
 
 load_dotenv()
 
@@ -41,7 +42,12 @@ def getenv(name: str) -> str:
 
 
 # ---------------------------------------------------------------- 1. get question
-question = " ".join(sys.argv[1:]).strip() or input("Enter your question: ").strip()
+# create WhisperASRModel:
+whisperModel = WhisperASRModel()
+
+
+
+question = input("Enter your question: ").strip()
 if not question:
     sys.exit("No question provided.")
 
